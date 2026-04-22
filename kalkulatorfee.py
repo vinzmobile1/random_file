@@ -2,141 +2,172 @@ import streamlit as st
 import math
 import uuid
 
+# ---------- Config ----------
+st.set_page_config(layout="wide")
+
+# ---------- Style ----------
+st.markdown("""
+<style>
+.card {
+    padding: 16px;
+    border-radius: 12px;
+    background: #111;
+    border: 1px solid #333;
+    margin-bottom: 10px;
+}
+.result-box {
+    padding: 20px;
+    border-radius: 12px;
+    background: #0d1b2a;
+    border: 1px solid #1b263b;
+}
+.big-text {
+    font-size: 28px;
+    font-weight: bold;
+}
+</style>
+""", unsafe_allow_html=True)
+
 # ---------- Helpers ----------
 def generate_id():
     return str(uuid.uuid4())[:8]
 
-
-def format_idr(num: float) -> str:
+def format_idr(num):
     return f"Rp {num:,.0f}".replace(",", ".")
-
 
 # ---------- Core Logic ----------
 def calculate(net, fees):
-    n_net = float(net or 0)
+    debug = []
 
     strict_pct_total = 0
     capped_pct_sum = 0
     nominal_sum = 0
 
-    initial_pcts = []
-    initial_nominals = []
-
     for f in fees:
-        pct = float(f["pct"] or 0) / 100
-        nominal = float(f["nominal"] or 0)
+        pct = f["pct"] / 100
 
         if f["type"] == "PCT":
             strict_pct_total += pct
-            initial_pcts.append((f["name"], pct))
-
         elif f["type"] == "CAPPED_PCT":
             capped_pct_sum += pct
-            initial_pcts.append((f["name"], pct))
-
         elif f["type"] == "NOMINAL":
-            nominal_sum += nominal
-            initial_nominals.append((f["name"], nominal))
+            nominal_sum += f["nominal"]
 
-    all_pcts_total = strict_pct_total + capped_pct_sum
+    all_pct = strict_pct_total + capped_pct_sum
 
-    pembagi_awal = 1 - all_pcts_total
-    aman_pembagi_awal = pembagi_awal if pembagi_awal > 0 else 0.0001
+    harga_tebakan = (net + nominal_sum) / max(0.0001, (1 - all_pct))
+    debug.append(f"Harga Tebakan: {harga_tebakan:,.0f}")
 
-    harga_tebakan = (n_net + nominal_sum) / aman_pembagi_awal
+    pembagi = 1 - strict_pct_total
+    penambah = net + nominal_sum
 
-    pembagi_akhir = 1 - strict_pct_total
-    penambah_akhir = n_net + nominal_sum
-
-    final_pcts = list(initial_pcts)
-    final_nominals = list(initial_nominals)
+    breakdown = []
 
     for f in fees:
+        pct = f["pct"] / 100
+
         if f["type"] == "CAPPED_PCT":
-            pct = float(f["pct"] or 0) / 100
-            max_val = float(f["max"] or 0)
+            calc = harga_tebakan * pct
 
-            cost_tebakan = harga_tebakan * pct
-            is_max = cost_tebakan > max_val
-
-            if is_max:
-                penambah_akhir += max_val
-                final_nominals.append((f["name"] + " (Limit)", max_val))
+            if calc > f["max"]:
+                penambah += f["max"]
+                breakdown.append((f["name"], f["max"], "CAPPED ✅"))
             else:
-                pembagi_akhir -= pct
-                final_pcts.append((f["name"], pct))
+                pembagi -= pct
+                breakdown.append((f["name"], calc, "NORMAL"))
+        elif f["type"] == "PCT":
+            breakdown.append((f["name"], pct, "PCT"))
+        else:
+            breakdown.append((f["name"], f["nominal"], "NOMINAL"))
 
-    aman_pembagi_akhir = pembagi_akhir if pembagi_akhir > 0 else 0.0001
-    harga_tampil_raw = penambah_akhir / aman_pembagi_akhir
+    harga = penambah / max(0.0001, pembagi)
+    harga = math.ceil(harga / 1000) * 1000
 
-    harga_tampil = math.ceil(harga_tampil_raw / 1000) * 1000
-
-    # pembuktian
+    # validasi
     total_potongan = 0
+    detail_final = []
 
     for f in fees:
-        pct = float(f["pct"] or 0) / 100
-        nominal = float(f["nominal"] or 0)
-        max_val = float(f["max"] or 0)
+        pct = f["pct"] / 100
 
         if f["type"] == "PCT":
-            potongan = harga_tampil * pct
+            val = harga * pct
         elif f["type"] == "NOMINAL":
-            potongan = nominal
+            val = f["nominal"]
         else:
-            calc = harga_tampil * pct
-            potongan = max_val if calc > max_val else calc
+            calc = harga * pct
+            val = min(calc, f["max"])
 
-        total_potongan += potongan
+        total_potongan += val
+        detail_final.append((f["name"], val))
 
-    hasil_bersih = harga_tampil - total_potongan
+    bersih = harga - total_potongan
 
-    return {
-        "harga_tampil": harga_tampil,
-        "hasil_bersih": hasil_bersih,
-        "total_potongan": total_potongan,
-    }
+    return harga, bersih, total_potongan, breakdown, detail_final, debug
 
-
-# ---------- UI ----------
-st.set_page_config(page_title="Kalkulator Harga", layout="wide")
-
-st.title("Kalkulator Harga Tampil (Streamlit)")
-
-# state
+# ---------- State ----------
 if "fees" not in st.session_state:
     st.session_state.fees = [
         {"id": generate_id(), "name": "Fee Kategori", "type": "PCT", "pct": 4.7, "max": 0, "nominal": 0},
         {"id": generate_id(), "name": "Asuransi", "type": "PCT", "pct": 0.5, "max": 0, "nominal": 0},
     ]
 
-net = st.number_input("Net yang diinginkan", value=7150000)
+# ---------- UI ----------
+st.title("💰 Kalkulator Harga (Advanced)")
 
-st.subheader("Fees")
+colA, colB = st.columns([2, 1])
 
-for i, f in enumerate(st.session_state.fees):
-    col1, col2, col3, col4, col5 = st.columns(5)
+with colA:
+    st.subheader("Input")
+    net = st.number_input("Net Target", value=7150000)
 
-    f["name"] = col1.text_input("Nama", f["name"], key=f"name_{i}")
-    f["type"] = col2.selectbox("Type", ["PCT", "CAPPED_PCT", "NOMINAL"], index=["PCT","CAPPED_PCT","NOMINAL"].index(f["type"]), key=f"type_{i}")
-    f["pct"] = col3.number_input("Pct %", value=float(f["pct"]), key=f"pct_{i}")
-    f["max"] = col4.number_input("Max", value=float(f["max"]), key=f"max_{i}")
-    f["nominal"] = col5.number_input("Nominal", value=float(f["nominal"]), key=f"nom_{i}")
+    st.subheader("Fees")
 
-    if st.button("Hapus", key=f"del_{i}"):
-        st.session_state.fees.pop(i)
+    for i, f in enumerate(st.session_state.fees):
+        st.markdown('<div class="card">', unsafe_allow_html=True)
+
+        c1, c2, c3, c4, c5 = st.columns(5)
+
+        f["name"] = c1.text_input("Nama", f["name"], key=f"name_{i}")
+        f["type"] = c2.selectbox("Type", ["PCT", "CAPPED_PCT", "NOMINAL"], key=f"type_{i}")
+        f["pct"] = c3.number_input("%", value=f["pct"], key=f"pct_{i}")
+        f["max"] = c4.number_input("Max", value=f["max"], key=f"max_{i}")
+        f["nominal"] = c5.number_input("Nominal", value=f["nominal"], key=f"nom_{i}")
+
+        if st.button("❌ Hapus", key=f"del_{i}"):
+            st.session_state.fees.pop(i)
+            st.rerun()
+
+        st.markdown('</div>', unsafe_allow_html=True)
+
+    if st.button("➕ Tambah Fee"):
+        st.session_state.fees.append(
+            {"id": generate_id(), "name": "Fee Baru", "type": "PCT", "pct": 0, "max": 0, "nominal": 0}
+        )
         st.rerun()
 
-if st.button("Tambah Fee"):
-    st.session_state.fees.append(
-        {"id": generate_id(), "name": "Fee Baru", "type": "PCT", "pct": 0, "max": 0, "nominal": 0}
-    )
-    st.rerun()
+with colB:
+    st.subheader("Hasil")
 
-# calculate
-if st.button("Hitung"):
-    result = calculate(net, st.session_state.fees)
+    if st.button("🔥 Hitung"):
+        harga, bersih, potongan, breakdown, detail_final, debug = calculate(net, st.session_state.fees)
 
-    st.success(f"Harga Tampil: {format_idr(result['harga_tampil'])}")
-    st.info(f"Hasil Bersih: {format_idr(result['hasil_bersih'])}")
-    st.warning(f"Total Potongan: {format_idr(result['total_potongan'])}")
+        st.markdown('<div class="result-box">', unsafe_allow_html=True)
+        st.markdown(f'<div class="big-text">{format_idr(harga)}</div>', unsafe_allow_html=True)
+        st.caption("Harga Tampil")
+        st.markdown('</div>', unsafe_allow_html=True)
+
+        st.success(f"Bersih: {format_idr(bersih)}")
+        st.warning(f"Total Potongan: {format_idr(potongan)}")
+
+        st.divider()
+
+        st.subheader("Breakdown Final")
+        for name, val in detail_final:
+            st.write(f"{name}: {format_idr(val)}")
+
+        st.divider()
+
+        st.subheader("Debug / Transparansi")
+        for d in debug:
+            st.code(d)
