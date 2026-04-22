@@ -1,173 +1,137 @@
 import streamlit as st
 import math
-import uuid
 
-# ---------- Config ----------
 st.set_page_config(layout="wide")
 
-# ---------- Style ----------
+# ---------- STYLE ----------
 st.markdown("""
 <style>
-.card {
-    padding: 16px;
-    border-radius: 12px;
-    background: #111;
-    border: 1px solid #333;
-    margin-bottom: 10px;
-}
-.result-box {
-    padding: 20px;
-    border-radius: 12px;
-    background: #0d1b2a;
-    border: 1px solid #1b263b;
-}
-.big-text {
-    font-size: 28px;
-    font-weight: bold;
-}
+.card {padding:16px;border-radius:12px;border:1px solid #333;margin-bottom:12px;background:#111;}
+.blue {color:#4cc9f0;}
+.orange {color:#f77f00;}
+.green {color:#2a9d8f;}
+.big {font-size:24px;font-weight:bold;}
+.box {padding:14px;border-radius:10px;background:#1a1a1a;margin-top:8px;}
+.warn {background:#2b1d12;border:1px solid #f77f00;}
+.ok {background:#0f2a1d;border:1px solid #2a9d8f;}
 </style>
 """, unsafe_allow_html=True)
 
-# ---------- Helpers ----------
-def generate_id():
-    return str(uuid.uuid4())[:8]
+def rp(x): return f"Rp {x:,.0f}".replace(",", ".")
 
-def format_idr(num):
-    return f"Rp {num:,.0f}".replace(",", ".")
+# ---------- INPUT ----------
+st.title("Logika Perhitungan Dinamis")
 
-# ---------- Core Logic ----------
-def calculate(net, fees):
-    debug = []
+net = st.number_input("Target Net", value=7150000)
 
-    strict_pct_total = 0
-    capped_pct_sum = 0
-    nominal_sum = 0
+fees = [
+    {"name":"Fee Kategori","pct":4.7,"type":"PCT","max":0,"nominal":0},
+    {"name":"Asuransi","pct":0.5,"type":"PCT","max":0,"nominal":0},
+    {"name":"Payment Fee","pct":1.8,"type":"CAPPED_PCT","max":50000,"nominal":0},
+    {"name":"Promo","pct":4.5,"type":"CAPPED_PCT","max":60000,"nominal":0},
+    {"name":"GoX","pct":0.5,"type":"CAPPED_PCT","max":40000,"nominal":0},
+    {"name":"Proses","pct":0,"type":"NOMINAL","max":0,"nominal":1250},
+]
 
+if st.button("🔥 Hitung"):
+
+    # ---------- STEP 1 ----------
+    st.markdown("### 1️⃣ Total Biaya Persentase (Awal)")
+    total_pct = sum(f["pct"] for f in fees if f["type"]!="NOMINAL")
+    pembagi_awal = 1 - total_pct/100
+
+    st.markdown('<div class="card">', unsafe_allow_html=True)
     for f in fees:
-        pct = f["pct"] / 100
+        if f["type"]!="NOMINAL":
+            st.write(f'{f["name"]}: {f["pct"]:.2f}%')
+    st.write("---")
+    st.write(f"Rumus: 100% - {total_pct:.2f}%")
+    st.markdown(f'<span class="blue">Angka Pembagi Awal: {pembagi_awal:.4f}</span>', unsafe_allow_html=True)
+    st.markdown('</div>', unsafe_allow_html=True)
 
-        if f["type"] == "PCT":
-            strict_pct_total += pct
-        elif f["type"] == "CAPPED_PCT":
-            capped_pct_sum += pct
-        elif f["type"] == "NOMINAL":
-            nominal_sum += f["nominal"]
+    # ---------- STEP 2 ----------
+    st.markdown("### 2️⃣ Total Biaya Nominal & Target Net")
+    nominal_sum = sum(f["nominal"] for f in fees)
 
-    all_pct = strict_pct_total + capped_pct_sum
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    st.write(f"Target Net: {rp(net)}")
+    st.write(f"Nominal: + {rp(nominal_sum)}")
+    penambah_awal = net + nominal_sum
+    st.markdown(f'<span class="blue">Angka Penambah Awal: {rp(penambah_awal)}</span>', unsafe_allow_html=True)
+    st.markdown('</div>', unsafe_allow_html=True)
 
-    harga_tebakan = (net + nominal_sum) / max(0.0001, (1 - all_pct))
-    debug.append(f"Harga Tebakan: {harga_tebakan:,.0f}")
+    # ---------- STEP 3 ----------
+    harga_tebakan = penambah_awal / pembagi_awal
+    st.markdown("### 3️⃣ Harga Simulasi (Tebakan)")
+    st.markdown(f'<div class="box">{rp(penambah_awal)} / {pembagi_awal:.4f} = <span class="blue">{rp(harga_tebakan)}</span></div>', unsafe_allow_html=True)
 
-    pembagi = 1 - strict_pct_total
+    # ---------- STEP 4 ----------
+    st.markdown("### 4️⃣ Deteksi Batas Maksimal")
+
+    capped_results = []
+    for f in fees:
+        if f["type"]=="CAPPED_PCT":
+            calc = harga_tebakan * f["pct"]/100
+            kena = calc > f["max"]
+
+            cls = "warn" if kena else "box"
+            st.markdown(f'<div class="{cls}">', unsafe_allow_html=True)
+            st.write(f"{f['name']}")
+            st.write(f"Fee Normal: {f['pct']}% x {rp(harga_tebakan)} = {rp(calc)}")
+            st.write(f"Limit: {rp(f['max'])}")
+
+            if kena:
+                st.markdown(f'<span class="orange">Kena limit → jadi {rp(f["max"])}</span>', unsafe_allow_html=True)
+            else:
+                st.markdown(f'<span class="blue">Normal</span>', unsafe_allow_html=True)
+
+            st.markdown('</div>', unsafe_allow_html=True)
+
+            capped_results.append((f, kena))
+
+    # ---------- STEP 5 ----------
+    st.markdown("### 5️⃣ Susunan Final")
+
+    pembagi = 1
     penambah = net + nominal_sum
 
-    breakdown = []
-
     for f in fees:
-        pct = f["pct"] / 100
+        if f["type"]=="PCT":
+            pembagi -= f["pct"]/100
 
-        if f["type"] == "CAPPED_PCT":
-            calc = harga_tebakan * pct
-
-            if calc > f["max"]:
-                penambah += f["max"]
-                breakdown.append((f["name"], f["max"], "CAPPED ✅"))
-            else:
-                pembagi -= pct
-                breakdown.append((f["name"], calc, "NORMAL"))
-        elif f["type"] == "PCT":
-            breakdown.append((f["name"], pct, "PCT"))
+    for f, kena in capped_results:
+        if kena:
+            penambah += f["max"]
         else:
-            breakdown.append((f["name"], f["nominal"], "NOMINAL"))
+            pembagi -= f["pct"]/100
 
-    harga = penambah / max(0.0001, pembagi)
-    harga = math.ceil(harga / 1000) * 1000
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    st.write(f"Pembagi Akhir: {pembagi:.4f}")
+    st.write(f"Penambah Akhir: {rp(penambah)}")
 
-    # validasi
-    total_potongan = 0
-    detail_final = []
+    harga_raw = penambah / pembagi
+    st.markdown(f'<div class="box">{rp(penambah)} / {pembagi:.4f} = {rp(harga_raw)}</div>', unsafe_allow_html=True)
+    st.markdown('</div>', unsafe_allow_html=True)
 
+    # ---------- STEP 6 ----------
+    harga_final = math.ceil(harga_raw/1000)*1000
+
+    st.markdown("### 6️⃣ Pembulatan")
+    st.markdown(f'<div class="card big">Harga Tampil: <span class="green">{rp(harga_final)}</span></div>', unsafe_allow_html=True)
+
+    # ---------- VALIDATION ----------
+    st.markdown("### ✅ Crosscheck")
+
+    total = 0
     for f in fees:
-        pct = f["pct"] / 100
-
-        if f["type"] == "PCT":
-            val = harga * pct
-        elif f["type"] == "NOMINAL":
+        if f["type"]=="PCT":
+            val = harga_final * f["pct"]/100
+        elif f["type"]=="NOMINAL":
             val = f["nominal"]
         else:
-            calc = harga * pct
-            val = min(calc, f["max"])
+            val = min(harga_final*f["pct"]/100, f["max"])
+        total += val
+        st.write(f"{f['name']}: {rp(val)}")
 
-        total_potongan += val
-        detail_final.append((f["name"], val))
-
-    bersih = harga - total_potongan
-
-    return harga, bersih, total_potongan, breakdown, detail_final, debug
-
-# ---------- State ----------
-if "fees" not in st.session_state:
-    st.session_state.fees = [
-        {"id": generate_id(), "name": "Fee Kategori", "type": "PCT", "pct": 4.7, "max": 0, "nominal": 0},
-        {"id": generate_id(), "name": "Asuransi", "type": "PCT", "pct": 0.5, "max": 0, "nominal": 0},
-    ]
-
-# ---------- UI ----------
-st.title("💰 Kalkulator Harga (Advanced)")
-
-colA, colB = st.columns([2, 1])
-
-with colA:
-    st.subheader("Input")
-    net = st.number_input("Net Target", value=7150000)
-
-    st.subheader("Fees")
-
-    for i, f in enumerate(st.session_state.fees):
-        st.markdown('<div class="card">', unsafe_allow_html=True)
-
-        c1, c2, c3, c4, c5 = st.columns(5)
-
-        f["name"] = c1.text_input("Nama", f["name"], key=f"name_{i}")
-        f["type"] = c2.selectbox("Type", ["PCT", "CAPPED_PCT", "NOMINAL"], key=f"type_{i}")
-        f["pct"] = c3.number_input("%", value=f["pct"], key=f"pct_{i}")
-        f["max"] = c4.number_input("Max", value=f["max"], key=f"max_{i}")
-        f["nominal"] = c5.number_input("Nominal", value=f["nominal"], key=f"nom_{i}")
-
-        if st.button("❌ Hapus", key=f"del_{i}"):
-            st.session_state.fees.pop(i)
-            st.rerun()
-
-        st.markdown('</div>', unsafe_allow_html=True)
-
-    if st.button("➕ Tambah Fee"):
-        st.session_state.fees.append(
-            {"id": generate_id(), "name": "Fee Baru", "type": "PCT", "pct": 0, "max": 0, "nominal": 0}
-        )
-        st.rerun()
-
-with colB:
-    st.subheader("Hasil")
-
-    if st.button("🔥 Hitung"):
-        harga, bersih, potongan, breakdown, detail_final, debug = calculate(net, st.session_state.fees)
-
-        st.markdown('<div class="result-box">', unsafe_allow_html=True)
-        st.markdown(f'<div class="big-text">{format_idr(harga)}</div>', unsafe_allow_html=True)
-        st.caption("Harga Tampil")
-        st.markdown('</div>', unsafe_allow_html=True)
-
-        st.success(f"Bersih: {format_idr(bersih)}")
-        st.warning(f"Total Potongan: {format_idr(potongan)}")
-
-        st.divider()
-
-        st.subheader("Breakdown Final")
-        for name, val in detail_final:
-            st.write(f"{name}: {format_idr(val)}")
-
-        st.divider()
-
-        st.subheader("Debug / Transparansi")
-        for d in debug:
-            st.code(d)
+    st.write("---")
+    st.success(f"Net diterima: {rp(harga_final - total)}")
