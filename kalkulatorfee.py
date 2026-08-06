@@ -1,152 +1,188 @@
 import streamlit as st
-import math
-import uuid
 
-st.set_page_config(layout="wide")
+st.set_page_config(page_title="Kalkulator Harga Tampil Shopee", layout="wide")
 
-def rp(x): return f"Rp {x:,.0f}".replace(",", ".")
+def format_rp(angka):
+    return f"Rp {int(round(angka)):,.0f}".replace(",", ".")
 
-def gid(): return str(uuid.uuid4())[:6]
+def format_pct(angka):
+    return f"{angka * 100:.2f}%"
 
-# ---------- STATE ----------
-if "fees" not in st.session_state:
-    st.session_state.fees = []
-
-# ---------- INPUT ----------
-st.title("🔬 Kalkulator Transparan (Manual Fees)")
-
-net = st.number_input("Target Net", value=7150000)
-
-st.subheader("📦 Input Fees Manual")
-
-for i, f in enumerate(st.session_state.fees):
-    col1, col2, col3, col4, col5 = st.columns(5)
-
-    f["name"] = col1.text_input("Nama", f["name"], key=f"name_{i}")
-
-    f["type"] = col2.selectbox(
-        "Type",
-        ["PCT", "CAPPED_PCT", "NOMINAL"],
-        key=f"type_{i}"
-    )
-
-    if f["type"] == "PCT":
-        f["pct"] = col3.number_input("%", value=f.get("pct", 0.0), key=f"pct_{i}")
-        f["max"] = 0
-        f["nominal"] = 0
-
-    elif f["type"] == "CAPPED_PCT":
-        f["pct"] = col3.number_input("%", value=f.get("pct", 0.0), key=f"pct_{i}")
-        f["max"] = col4.number_input("Max", value=f.get("max", 0.0), key=f"max_{i}")
-        f["nominal"] = 0
-
+# --- FUNGSI PERHITUNGAN MAJU (Sesuai Logika Excel Anda) ---
+def calculate_shopee(harga_tampil, config):
+    A = harga_tampil
+    
+    # 1. VOUCHER
+    if config['use_voucher']:
+        B = min(A * config['v_pct'], config['v_max'])
+        C = B * config['v_seller_pct']
     else:
-        f["nominal"] = col5.number_input("Nominal", value=f.get("nominal", 0.0), key=f"nom_{i}")
-        f["pct"] = 0
-        f["max"] = 0
+        B = 0
+        C = 0
+        
+    D = A - B
+    
+    # Mencegah error bagi nol jika D = 0
+    if D <= 0:
+        return 0, {}
 
-    if col5.button("❌", key=f"del_{i}"):
-        st.session_state.fees.pop(i)
-        st.rerun()
+    # 2. BIAYA LAYANAN
+    E = round(D * config['admin_pct'])
+    F = round(min(D * config['ongkir_pct'], config['ongkir_max']))
+    G = round(min(D * config['mall_pct'], config['mall_max']))
+    H = round(min(D * config['xtra_pct'], config['xtra_max']))
+    I = config['proses_fee']
+    J = round(D * config['asuransi_pct'])
+    
+    # SUMMARY
+    K = E
+    L = F + G + H + I
+    
+    # 3. LOGIC (Subsidi & Utang Fee)
+    M = B - C
+    N = K / D
+    O = L / D
+    
+    P = round(N * M)
+    Q = round(O * M)
+    R = P + Q
+    
+    S = M - R
+    T = D - J - K - L
+    
+    U = S + T # Total Pendapatan Akhir (Harga Bersih)
+    
+    # Dictionary untuk menyimpan seluruh data breakdown
+    breakdown = {
+        'A': A, 'B': B, 'C': C, 'D': D, 'E': E, 'F': F, 'G': G, 'H': H, 'I': I, 'J': J,
+        'K': K, 'L': L, 'M': M, 'N': N, 'O': O, 'P': P, 'Q': Q, 'R': R, 'S': S, 'T': T, 'U': U
+    }
+    
+    return U, breakdown
 
-st.button("➕ Tambah Fee", on_click=lambda: st.session_state.fees.append({
-    "id": gid(), "name": "Fee Baru", "type": "PCT", "pct": 0.0, "max": 0.0, "nominal": 0.0
-}))
-
-# ---------- CALC ----------
-if st.button("🔥 Hitung"):
-
-    fees = st.session_state.fees
-
-    # STEP 1
-    strict = sum(f["pct"] for f in fees if f["type"]=="PCT")
-    capped = sum(f["pct"] for f in fees if f["type"]=="CAPPED_PCT")
-    total_pct = strict + capped
-    pembagi_awal = 1 - total_pct/100
-
-    st.header("1️⃣ Pembagi Awal")
-    st.write(f"Total %: {total_pct:.2f}%")
-    st.code(f"1 - {total_pct:.2f}% = {pembagi_awal:.4f}")
-
-    # STEP 2
-    nominal_sum = sum(f["nominal"] for f in fees)
-    penambah_awal = net + nominal_sum
-
-    st.header("2️⃣ Penambah Awal")
-    st.write(rp(penambah_awal))
-
-    # STEP 3
-    harga_tebakan = penambah_awal / max(0.0001, pembagi_awal)
-
-    st.header("3️⃣ Harga Tebakan")
-    st.write(rp(harga_tebakan))
-
-    # STEP 4 (DETAIL)
-    st.header("4️⃣ Evaluasi Limit")
-
-    evaluasi = []
-
-    for f in fees:
-        if f["type"]=="CAPPED_PCT":
-            val = harga_tebakan * f["pct"]/100
-            kena = val > f["max"]
-            final = f["max"] if kena else val
-
-            st.write("---")
-            st.write(f"{f['name']}")
-            st.write(f"{f['pct']}% x {rp(harga_tebakan)} = {rp(val)}")
-            st.write(f"Limit: {rp(f['max'])}")
-
-            if kena:
-                st.error(f"KENA LIMIT → {rp(final)}")
-            else:
-                st.success(f"NORMAL → {rp(final)}")
-
-            evaluasi.append((f, kena, final))
-
-    # STEP 5
-    st.header("5️⃣ Final Formula")
-
-    pembagi = 1
-    penambah = net + nominal_sum
-
-    for f in fees:
-        if f["type"]=="PCT":
-            pembagi -= f["pct"]/100
-
-    for f, kena, final in evaluasi:
-        if kena:
-            penambah += final
+# --- FUNGSI PENCARIAN REVERSE (Mencari Harga Tampil) ---
+def find_harga_tampil(target_bersih, config):
+    low = target_bersih
+    high = target_bersih * 3.0 # Batas atas tebakan (3x lipat)
+    
+    # Binary Search untuk akurasi mendekati Rp 1
+    for _ in range(100): 
+        mid = (low + high) / 2
+        current_bersih, _ = calculate_shopee(mid, config)
+        
+        if current_bersih < target_bersih:
+            low = mid
         else:
-            pembagi -= f["pct"]/100
+            high = mid
+            
+    # Kembalikan nilai tengah dengan pembulatan ke atas/bawah yang paling pas
+    _, breakdown = calculate_shopee(round(high), config)
+    return round(high), breakdown
 
-    harga_raw = penambah / max(0.0001, pembagi)
 
-    st.write(f"Pembagi: {pembagi:.4f}")
-    st.write(f"Penambah: {rp(penambah)}")
-    st.write(f"Harga Raw: {rp(harga_raw)}")
+# --- USER INTERFACE STREAMLIT ---
+st.title("🍊 Kalkulator Harga Tampil Shopee")
+st.markdown("Aplikasi ini menghitung **Harga Tampil (Markup)** otomatis berdasarkan **Harga Bersih** yang Anda inginkan, dengan mempertimbangkan skema voucher dan potongan layanan/admin Shopee.")
 
-    # STEP 6
-    harga_final = math.ceil(harga_raw/1000)*1000
+# SIDEBAR: Konfigurasi Biaya (Bisa diedit manual oleh user)
+with st.sidebar:
+    st.header("⚙️ Pengaturan Biaya Shopee")
+    st.caption("Ubah persentase/maksimal biaya sesuai kebijakan terbaru Shopee.")
+    
+    admin_pct = st.number_input("Biaya Admin (%)", value=4.70, step=0.1) / 100
+    
+    ongkir_pct = st.number_input("Gratis Ongkir XTRA (%)", value=1.00, step=0.1) / 100
+    ongkir_max = st.number_input("Max Ongkir XTRA (Rp)", value=40000, step=1000)
+    
+    mall_pct = st.number_input("Layanan Mall (%)", value=1.80, step=0.1) / 100
+    mall_max = st.number_input("Max Layanan Mall (Rp)", value=50000, step=1000)
+    
+    xtra_pct = st.number_input("Promo XTRA+ (%)", value=6.50, step=0.1) / 100
+    xtra_max = st.number_input("Max Promo XTRA (Rp)", value=80000, step=1000)
+    
+    asuransi_pct = st.number_input("Biaya Asuransi (%)", value=0.50, step=0.1) / 100
+    proses_fee = st.number_input("Biaya Proses (Rp)", value=1250, step=250)
 
-    st.header("6️⃣ Harga Final")
-    st.success(rp(harga_final))
+# KONTEN UTAMA
+col1, col2 = st.columns([1, 1])
 
-    # VALIDASI
-    st.header("✅ Crosscheck")
+with col1:
+    st.subheader("💰 Input Target Pendapatan")
+    target_bersih = st.number_input("Masukkan Harga Bersih yang diinginkan (Pencairan):", min_value=1000, value=9850000, step=10000)
+    
+    use_voucher = st.radio("Apakah menggunakan Voucher Diskon?", ("Tanpa Voucher", "Gunakan Voucher")) == "Gunakan Voucher"
 
-    total = 0
-    for f in fees:
-        if f["type"]=="PCT":
-            val = harga_final * f["pct"]/100
-        elif f["type"]=="NOMINAL":
-            val = f["nominal"]
+with col2:
+    if use_voucher:
+        st.subheader("🎟️ Input Data Voucher")
+        v_pct = st.number_input("% Voucher", value=30.0, step=1.0) / 100
+        v_max = st.number_input("Max Voucher (Rp)", value=500000, step=10000)
+        
+        c1, c2 = st.columns(2)
+        with c1:
+            v_shopee_pct = st.number_input("% Ditanggung Shopee", value=65.0, step=1.0) / 100
+        with c2:
+            v_seller_pct = st.number_input("% Ditanggung Seller", value=35.0, step=1.0) / 100
+            
+        if abs((v_shopee_pct + v_seller_pct) - 1.0) > 0.01:
+            st.error("Total % Ditanggung Shopee & Seller harus 100%!")
+
+# Siapkan Config Dictionary
+config = {
+    'use_voucher': use_voucher,
+    'v_pct': v_pct if use_voucher else 0,
+    'v_max': v_max if use_voucher else 0,
+    'v_shopee_pct': v_shopee_pct if use_voucher else 0,
+    'v_seller_pct': v_seller_pct if use_voucher else 0,
+    'admin_pct': admin_pct,
+    'ongkir_pct': ongkir_pct, 'ongkir_max': ongkir_max,
+    'mall_pct': mall_pct, 'mall_max': mall_max,
+    'xtra_pct': xtra_pct, 'xtra_max': xtra_max,
+    'asuransi_pct': asuransi_pct,
+    'proses_fee': proses_fee
+}
+
+if st.button("🔄 Hitung Harga Tampil", type="primary", use_container_width=True):
+    harga_tampil, bd = find_harga_tampil(target_bersih, config)
+    
+    st.success(f"### 🎉 Harga Tampil yang harus diset di Shopee: {format_rp(harga_tampil)}")
+    
+    st.markdown("---")
+    st.subheader("📑 Bukti Perhitungan (Breakdown)")
+    st.markdown("*Angka di bawah ini mereplika perhitungan di Excel yang Anda berikan.*")
+    
+    # Tabel Data
+    tab1, tab2, tab3 = st.tabs(["Informasi Voucher & Harga", "Rincian Biaya Layanan", "Logika Pencairan (Summary)"])
+    
+    with tab1:
+        st.write(f"**A. Subtotal Pesanan/Harga Tampil:** {format_rp(bd['A'])}")
+        st.write(f"**B. Voucher Terpotong di Seller Center:** {format_rp(bd['B'])}")
+        st.write(f"**C. Voucher Ditanggung Seller:** {format_rp(bd['C'])}")
+        st.write(f"**D. Harga Setelah Potong Voucher (A-B):** {format_rp(bd['D'])}")
+        
+    with tab2:
+        st.write(f"**E. Biaya Admin ({format_pct(admin_pct)}):** {format_rp(bd['E'])}")
+        st.write(f"**F. Gratis Ongkir XTRA ({format_pct(ongkir_pct)} - Max {format_rp(ongkir_max)}):** {format_rp(bd['F'])}")
+        st.write(f"**G. Layanan Mall ({format_pct(mall_pct)} - Max {format_rp(mall_max)}):** {format_rp(bd['G'])}")
+        st.write(f"**H. Promo XTRA+ ({format_pct(xtra_pct)} - Max {format_rp(xtra_max)}):** {format_rp(bd['H'])}")
+        st.write(f"**I. Proses Pesanan:** {format_rp(bd['I'])}")
+        st.write(f"**J. Biaya Asuransi ({format_pct(asuransi_pct)}):** {format_rp(bd['J'])}")
+        st.write(f"**Total Biaya Layanan:** {format_rp(bd['J'] + bd['K'] + bd['L'])}")
+        
+    with tab3:
+        st.write(f"**K. Total Admin di Seller Center (E):** {format_rp(bd['K'])}")
+        st.write(f"**L. Biaya Layanan + Proses Pesanan (F+G+H+I):** {format_rp(bd['L'])}")
+        st.write(f"**M. Voucher Ditanggung Shopee (B-C):** {format_rp(bd['M'])}")
+        st.write(f"**N. Tarif Admin Toko K/D:** {format_pct(bd['N'])}")
+        st.write(f"**O. Tarif Layanan Toko L/D:** {format_pct(bd['O'])}")
+        st.write(f"**P. Utang Selisih Admin (N*M):** {format_rp(bd['P'])}")
+        st.write(f"**Q. Utang Selisih Layanan (O*M):** {format_rp(bd['Q'])}")
+        st.write(f"**R. Total Utang Fee (P+Q):** {format_rp(bd['R'])}")
+        st.write(f"**S. Refund Bersih Shopee (M-R):** {format_rp(bd['S'])}")
+        st.write(f"**T. Payout Awal Seller Center (D-J-K-L):** {format_rp(bd['T'])}")
+        st.divider()
+        st.markdown(f"#### **U. Total Pendapatan Akhir / Harga Bersih (S+T) : {format_rp(bd['U'])}**")
+        if bd['U'] == target_bersih:
+            st.success("✅ Terverifikasi: Harga Bersih perhitungan SAMA PERSIS dengan Target Input!")
         else:
-            val = min(harga_final*f["pct"]/100, f["max"])
-
-        total += val
-        st.write(f"{f['name']}: {rp(val)}")
-
-    net_real = harga_final - total
-    st.write("---")
-    st.success(f"Net diterima: {rp(net_real)}")
+            st.warning("⚠️ Ada selisih pembulatan sebesar beberapa Rupiah. Hal ini wajar karena sistem Shopee membulatkan per Rupiah tiap transaksi.")
