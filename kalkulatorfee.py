@@ -13,12 +13,12 @@ def format_pct(angka):
 # --- INIT STATE: TABEL DATA MENTAH ---
 if 'biaya_df' not in st.session_state:
     st.session_state.biaya_df = pd.DataFrame([
-        {"Aktif": True, "Deskripsi": "Biaya Administrasi", "Kategori": "Admin", "Tipe Cut": "Persentase (%)", "Nilai": 4.7, "Max (Rp)": 0},
-        {"Aktif": True, "Deskripsi": "Gratis Ongkir XTRA (1% - Max 40rb)", "Kategori": "Layanan", "Tipe Cut": "Persen dgn Batas Max", "Nilai": 1.0, "Max (Rp)": 40000},
-        {"Aktif": True, "Deskripsi": "Layanan Mall 1.8% - Max 50rb", "Kategori": "Layanan", "Tipe Cut": "Persen dgn Batas Max", "Nilai": 1.8, "Max (Rp)": 50000},
-        {"Aktif": True, "Deskripsi": "Promo XTRA+ (6.5%) 80rb", "Kategori": "Layanan", "Tipe Cut": "Persen dgn Batas Max", "Nilai": 6.5, "Max (Rp)": 80000},
-        {"Aktif": True, "Deskripsi": "Biaya Proses Pesanan", "Kategori": "Layanan", "Tipe Cut": "Nominal (Rp)", "Nilai": 1250.0, "Max (Rp)": 0},
-        {"Aktif": True, "Deskripsi": "Biaya Asuransi 0,5%", "Kategori": "Asuransi", "Tipe Cut": "Persentase (%)", "Nilai": 0.5, "Max (Rp)": 0},
+        {"Aktif": True, "Deskripsi": "Biaya Administrasi", "Kategori": "Admin", "Tipe Cut": "Persentase (%)", "Persentase (%)": 4.7, "Nominal / Batas Max (Rp)": 0},
+        {"Aktif": True, "Deskripsi": "Gratis Ongkir XTRA (1% - Max 40rb)", "Kategori": "Layanan", "Tipe Cut": "Persen dgn Batas Max", "Persentase (%)": 1.0, "Nominal / Batas Max (Rp)": 40000},
+        {"Aktif": True, "Deskripsi": "Layanan Mall 1.8% - Max 50rb", "Kategori": "Layanan", "Tipe Cut": "Persen dgn Batas Max", "Persentase (%)": 1.8, "Nominal / Batas Max (Rp)": 50000},
+        {"Aktif": True, "Deskripsi": "Promo XTRA+ (6.5%) 80rb", "Kategori": "Layanan", "Tipe Cut": "Persen dgn Batas Max", "Persentase (%)": 6.5, "Nominal / Batas Max (Rp)": 80000},
+        {"Aktif": True, "Deskripsi": "Biaya Proses Pesanan", "Kategori": "Layanan", "Tipe Cut": "Nominal (Rp)", "Persentase (%)": 0.0, "Nominal / Batas Max (Rp)": 1250},
+        {"Aktif": True, "Deskripsi": "Biaya Asuransi 0,5%", "Kategori": "Asuransi", "Tipe Cut": "Persentase (%)", "Persentase (%)": 0.5, "Nominal / Batas Max (Rp)": 0},
     ])
 
 
@@ -48,12 +48,16 @@ def calculate_shopee(harga_tampil, target_bersih, voucher_cfg, fees_df):
             continue
             
         val = 0
+        pct_val = row["Persentase (%)"]
+        nom_val = row["Nominal / Batas Max (Rp)"]
+        
+        # LOGIC PERUBAHAN TIPE CUT
         if row["Tipe Cut"] == "Persentase (%)":
-            val = D * (row["Nilai"] / 100)
+            val = D * (pct_val / 100)
         elif row["Tipe Cut"] == "Persen dgn Batas Max":
-            val = min(D * (row["Nilai"] / 100), row["Max (Rp)"])
+            val = min(D * (pct_val / 100), nom_val)
         elif row["Tipe Cut"] == "Nominal (Rp)":
-            val = row["Nilai"]
+            val = nom_val # Jika pilih nominal, yang dibaca adalah kolom nominal/batas max
             
         val = round(val)
         rincian_potongan.append(val)
@@ -77,7 +81,7 @@ def calculate_shopee(harga_tampil, target_bersih, voucher_cfg, fees_df):
     
     # Simpan semua rincian logika ke dictionary untuk tabel Summary
     breakdown = {
-        'Admin': admin_total, 'Layanan': layanan_total, 'Asuransi': asuransi_total,
+        'D': D, 'Admin': admin_total, 'Layanan': layanan_total, 'Asuransi': asuransi_total,
         'M': M, 'N': N, 'O': O, 'P': P, 'Q': Q, 'R': R, 'S': S, 'T': T, 'U': U
     }
     
@@ -101,7 +105,7 @@ def find_optimum_price(target_bersih, voucher_cfg, fees_df):
 
 
 # --- USER INTERFACE (UI) ---
-st.title("🍊 Kalkulator Harga Jual Shopee (Tabel Tunggal & Co-Fund)")
+st.title("🍊 Kalkulator Harga Jual Shopee")
 
 # 1. INPUT TARGET & VOUCHER
 col1, col2 = st.columns(2)
@@ -153,8 +157,8 @@ config_kolom = {
     "Deskripsi": st.column_config.TextColumn("Deskripsi Biaya / Komponen"),
     "Kategori": st.column_config.SelectboxColumn("Kategori (Wajib)", options=["Admin", "Layanan", "Asuransi"], required=True),
     "Tipe Cut": st.column_config.SelectboxColumn("Tipe Potongan", options=["Persentase (%)", "Persen dgn Batas Max", "Nominal (Rp)"], required=True),
-    "Nilai": st.column_config.NumberColumn("Nilai (%/Rp)", format="%.2f"),
-    "Max (Rp)": st.column_config.NumberColumn("Batas Max (Rp)", format="%d"),
+    "Persentase (%)": st.column_config.NumberColumn("Persentase (%)", format="%.2f"),
+    "Nominal / Batas Max (Rp)": st.column_config.NumberColumn("Nominal / Batas Max (Rp)", format="%d"),
     "Nominal Potongan": st.column_config.TextColumn("Nominal Potongan (Otomatis)", disabled=True)
 }
 
@@ -174,13 +178,13 @@ if not new_state_df.equals(st.session_state.biaya_df.reset_index(drop=True)):
 # 4. TABEL LOGIC & SUMMARY CO-FUND VOUCHER
 st.markdown("---")
 st.subheader("📑 2. Summary & Logic Pencairan Shopee")
-st.caption("Tabel di bawah ini mereplika perhitungan Utang Selisih Admin & Layanan berdasarkan skema Co-Fund Voucher.")
 
 # Membuat Data Struktur untuk Tabel Logic
 logic_data = [
     {"Keterangan": "🔹 SUMMARY", "Nominal / Persentase": "", "Catatan": ""},
-    {"Keterangan": "Biaya Admin di Seller Center", "Nominal / Persentase": format_rp(bd['Admin']), "Catatan": f"{format_pct(bd['N'])} dari Harga Potong Voucher"},
-    {"Keterangan": "Biaya Layanan + Proses Pesanan", "Nominal / Persentase": format_rp(bd['Layanan']), "Catatan": f"{format_pct(bd['O'])} dari Harga Potong Voucher"},
+    {"Keterangan": "Harga Setelah Potong Voucher", "Nominal / Persentase": format_rp(bd['D']), "Catatan": "Harga tampil (A) dikurangi total potongan voucher (B)."},
+    {"Keterangan": "Biaya Admin di Seller Center", "Nominal / Persentase": format_rp(bd['Admin']), "Catatan": f"{format_pct(bd['N'])} dari Harga Setelah Potong Voucher"},
+    {"Keterangan": "Biaya Layanan + Proses Pesanan", "Nominal / Persentase": format_rp(bd['Layanan']), "Catatan": f"{format_pct(bd['O'])} dari Harga Setelah Potong Voucher"},
     {"Keterangan": "Biaya Asuransi (Opsional)", "Nominal / Persentase": format_rp(bd['Asuransi']), "Catatan": "-"},
     
     {"Keterangan": "🔸 LOGIC", "Nominal / Persentase": "", "Catatan": ""},
