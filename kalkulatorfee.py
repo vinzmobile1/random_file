@@ -7,11 +7,8 @@ st.set_page_config(page_title="Kalkulator Harga Tampil", layout="wide")
 def format_rp(angka):
     return f"Rp {int(round(angka)):,.0f}".replace(",", ".")
 
-def format_pct(angka):
-    return f"{angka:.2f}%"
-
-# --- INIT STATE: TABEL DINAMIS DEFAULT ---
-# Membuat default data seperti gambar agar user tidak perlu repot input dari nol
+# --- INIT STATE: TABEL DATA MENTAH ---
+# Menyimpan data tabel (tanpa kolom hasil hitung) di session state
 if 'biaya_df' not in st.session_state:
     st.session_state.biaya_df = pd.DataFrame([
         {"Aktif": True, "Deskripsi": "Biaya Administrasi", "Kategori": "Admin", "Tipe Cut": "Persentase (%)", "Nilai": 4.7, "Max (Rp)": 0},
@@ -27,7 +24,6 @@ if 'biaya_df' not in st.session_state:
 def calculate_shopee(harga_tampil, target_bersih, voucher_cfg, fees_df):
     A = harga_tampil
     
-    # 1. VOUCHER
     if voucher_cfg['use']:
         B = min(A * (voucher_cfg['pct']/100), voucher_cfg['max_rp'])
         C = B * (voucher_cfg['seller_pct']/100)
@@ -37,7 +33,6 @@ def calculate_shopee(harga_tampil, target_bersih, voucher_cfg, fees_df):
     D = A - B
     if D <= 0: return 0, [], 0, 0
     
-    # 2. BIAYA LAYANAN DARI TABEL DINAMIS
     admin_total = 0
     layanan_total = 0
     asuransi_total = 0
@@ -59,12 +54,10 @@ def calculate_shopee(harga_tampil, target_bersih, voucher_cfg, fees_df):
         val = round(val)
         rincian_potongan.append(val)
         
-        # Kelompokkan berdasarkan kategori untuk perhitungan utang selisih Shopee
         if row["Kategori"] == "Admin": admin_total += val
         elif row["Kategori"] == "Layanan": layanan_total += val
         elif row["Kategori"] == "Asuransi": asuransi_total += val
 
-    # 3. LOGIC UTANG FEE & SUBSIDI (Sesuai rumus lama)
     M = B - C
     N = admin_total / D if D > 0 else 0
     O = layanan_total / D if D > 0 else 0
@@ -76,7 +69,7 @@ def calculate_shopee(harga_tampil, target_bersih, voucher_cfg, fees_df):
     S = M - R
     T = D - asuransi_total - admin_total - layanan_total
     
-    U = S + T # Harga Bersih (Pendapatan Akhir)
+    U = S + T
     
     return U, rincian_potongan, (admin_total + layanan_total + asuransi_total), D
 
@@ -84,7 +77,6 @@ def find_optimum_price(target_bersih, voucher_cfg, fees_df):
     low = target_bersih
     high = target_bersih * 3.0 
     
-    # Binary search real-time
     for _ in range(70): 
         mid = (low + high) / 2
         current_bersih, _, _, _ = calculate_shopee(mid, target_bersih, voucher_cfg, fees_df)
@@ -99,14 +91,13 @@ def find_optimum_price(target_bersih, voucher_cfg, fees_df):
 
 
 # --- USER INTERFACE (UI) ---
-st.title("📊 Kalkulator Harga Jual Optimum (Real-Time)")
-st.markdown("Ubah angka di bawah ini, perhitungan akan berjalan otomatis tanpa perlu klik tombol.")
+st.title("🍊 Kalkulator Harga Jual Shopee (Tabel Tunggal)")
 
 # 1. INPUT TARGET & VOUCHER
 col1, col2 = st.columns(2)
 with col1:
     st.subheader("💰 Target Pendapatan")
-    target_bersih = st.number_input("Harga Bersih yang diinginkan (Rp):", min_value=1000, value=7150522, step=10000)
+    target_bersih = st.number_input("Harga Bersih (Pencairan) yang diinginkan:", min_value=1000, value=7150522, step=10000)
 
 with col2:
     st.subheader("🎟️ Pengaturan Voucher")
@@ -128,61 +119,51 @@ voucher_cfg = {
     'shopee_pct': v_shopee_pct, 'seller_pct': v_seller_pct
 }
 
-# 2. TABEL BIAYA (Bisa di Edit / Tambah Baris)
-st.markdown("---")
-st.subheader("⚙️ Rincian Biaya & Komponen (Tabel Dinamis)")
-st.info("💡 Anda bisa mengedit angka, mencentang/uncentang komponen, hingga **menambah/menghapus baris** secara langsung pada tabel di bawah.")
-
-# Konfigurasi kolom tabel agar ramah pengguna
-config_kolom = {
-    "Aktif": st.column_config.CheckboxColumn("Status", default=True),
-    "Deskripsi": st.column_config.TextColumn("Deskripsi Biaya / Komponen"),
-    "Kategori": st.column_config.SelectboxColumn("Kategori (Penting untuk Rumus)", options=["Admin", "Layanan", "Asuransi"], required=True),
-    "Tipe Cut": st.column_config.SelectboxColumn("Tipe Potongan", options=["Persentase (%)", "Persen dgn Batas Max", "Nominal (Rp)"], required=True),
-    "Nilai": st.column_config.NumberColumn("Nilai (% atau Rp)"),
-    "Max (Rp)": st.column_config.NumberColumn("Batas Max (Rp)"),
-}
-
-# Render data editor (User input)
-edited_df = st.data_editor(
-    st.session_state.biaya_df, 
-    column_config=config_kolom, 
-    num_rows="dynamic", # Memungkinkan fitur tambah/hapus baris
-    use_container_width=True,
-    hide_index=True
+# --- HITUNG BERDASARKAN DATA SAAT INI ---
+harga_optimum, rincian_potongan, total_potongan, hrg_stlh_voc = find_optimum_price(
+    target_bersih, voucher_cfg, st.session_state.biaya_df
 )
 
-# 3. KALKULASI & HASIL (Menyatu dalam UI)
-harga_optimum, rincian_potongan, total_potongan, hrg_stlh_voc = find_optimum_price(target_bersih, voucher_cfg, edited_df)
-
-# Merangkai kembali tabel dengan tambahan kolom "Nominal Potongan" dari hasil hitung
-output_df = edited_df.copy()
-output_df["Nominal Potongan"] = [format_rp(x) if aktif else "-" for x, aktif in zip(rincian_potongan, edited_df["Aktif"])]
-
-# TAMPILAN BANNER HASIL UTAMA (Menyerupai Gambar)
+# 2. MENAMPILKAN HARGA FINAL DI ATAS TABEL
 st.markdown("---")
 pct_total_potongan = (total_potongan / hrg_stlh_voc * 100) if hrg_stlh_voc > 0 else 0
 
-st.markdown(f"""
-<div style="background-color: #f0f8ff; padding: 20px; border-radius: 10px; border: 1px solid #cce0ff; display: flex; justify_content: space-between; align-items: center;">
-    <div>
-        <h3 style="color: #0044cc; margin: 0;">📊 KALKULASI HARGA JUAL OPTIMUM</h3>
-    </div>
-    <div style="text-align: right;">
-        <h1 style="color: #0055ff; margin: 0; font-size: 36px;">{format_rp(harga_optimum)}</h1>
-        <span style="background-color: white; padding: 5px 15px; border-radius: 20px; border: 1px solid #ccc; font-size: 14px;">
-            Total Potongan: <b>{format_pct(pct_total_potongan)}</b> / {format_rp(total_potongan)}
-        </span>
-    </div>
-</div>
-""", unsafe_allow_html=True)
+c_res1, c_res2 = st.columns([1, 1])
+c_res1.metric(label="🎯 Harga Jual Optimum (Harga Tampil)", value=format_rp(harga_optimum))
+c_res2.metric(label="📉 Total Potongan Biaya & Asuransi", value=format_rp(total_potongan), delta=f"-{pct_total_potongan:.2f}%", delta_color="inverse")
 
-# TAMPILAN TABEL FINAL DENGAN NOMINAL POTONGAN
-st.write("#### Rekap Nominal Potongan per Komponen")
-st.dataframe(
-    output_df[["Aktif", "Deskripsi", "Tipe Cut", "Nilai", "Max (Rp)", "Nominal Potongan"]],
+# 3. TABEL DINAMIS (INPUT + OUTPUT GABUNGAN)
+st.subheader("⚙️ Rincian Biaya & Komponen")
+
+# Membuat salinan dataframe khusus untuk ditampilkan di layar (menambahkan kolom hasil hitung)
+display_df = st.session_state.biaya_df.copy()
+display_df["Nominal Potongan"] = [f"- {format_rp(x)}" if aktif else "-" for x, aktif in zip(rincian_potongan, display_df["Aktif"])]
+
+# Konfigurasi kolom
+config_kolom = {
+    "Aktif": st.column_config.CheckboxColumn("Status", default=True),
+    "Deskripsi": st.column_config.TextColumn("Deskripsi Biaya / Komponen"),
+    "Kategori": st.column_config.SelectboxColumn("Kategori (Wajib)", options=["Admin", "Layanan", "Asuransi"], required=True),
+    "Tipe Cut": st.column_config.SelectboxColumn("Tipe Potongan", options=["Persentase (%)", "Persen dgn Batas Max", "Nominal (Rp)"], required=True),
+    "Nilai": st.column_config.NumberColumn("Nilai (%/Rp)", format="%.2f"),
+    "Max (Rp)": st.column_config.NumberColumn("Batas Max (Rp)", format="%d"),
+    "Nominal Potongan": st.column_config.TextColumn("Nominal Potongan (Otomatis)", disabled=True) # DISABLED = READ-ONLY
+}
+
+# Render tabel
+edited_df = st.data_editor(
+    display_df, 
+    column_config=config_kolom, 
+    num_rows="dynamic", # Bisa tambah/hapus baris
     use_container_width=True,
     hide_index=True
 )
 
-st.caption("✅ Harga bersih setelah semua potongan dipastikan sesuai dengan Target Pendapatan Anda.")
+# Cek apakah user merubah isi tabel (merubah angka, centang, tambah/hapus baris)
+# Jika berubah, simpan perubahannya ke session state, lalu muat ulang halaman agar angka terhitung ulang
+new_state_df = edited_df.drop(columns=["Nominal Potongan"]).reset_index(drop=True)
+if not new_state_df.equals(st.session_state.biaya_df.reset_index(drop=True)):
+    st.session_state.biaya_df = new_state_df
+    st.rerun()
+
+st.caption("💡 *Tabel di atas sepenuhnya interaktif. Anda bisa mengedit nilai, mencentang/menghapus centang (Status), hingga menambah baris baru. Hasil akan langsung terhitung ulang seketika pada kolom paling kanan (Nominal Potongan).*")
