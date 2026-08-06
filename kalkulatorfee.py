@@ -43,28 +43,35 @@ def calculate_shopee(harga_tampil, target_bersih, voucher_cfg, fees_df):
     rincian_potongan = []
     
     for idx, row in fees_df.iterrows():
-        if not row["Aktif"]:
+        # CEK NILAI KOSONG (NONE/NAN) SAAT BARIS BARU DITAMBAHKAN
+        is_aktif = row["Aktif"] if pd.notna(row["Aktif"]) else False
+        
+        if not is_aktif:
             rincian_potongan.append(0)
             continue
             
+        # Ubah nilai None menjadi 0 atau string default agar tidak TypeError
+        pct_val = float(row["Persentase (%)"]) if pd.notna(row["Persentase (%)"]) else 0.0
+        nom_val = float(row["Nominal / Batas Max (Rp)"]) if pd.notna(row["Nominal / Batas Max (Rp)"]) else 0.0
+        tipe_cut = str(row["Tipe Cut"]) if pd.notna(row["Tipe Cut"]) else "Persentase (%)"
+        kategori = str(row["Kategori"]) if pd.notna(row["Kategori"]) else "Layanan"
+        
         val = 0
-        pct_val = row["Persentase (%)"]
-        nom_val = row["Nominal / Batas Max (Rp)"]
         
         # LOGIC PERUBAHAN TIPE CUT
-        if row["Tipe Cut"] == "Persentase (%)":
+        if tipe_cut == "Persentase (%)":
             val = D * (pct_val / 100)
-        elif row["Tipe Cut"] == "Persen dgn Batas Max":
+        elif tipe_cut == "Persen dgn Batas Max":
             val = min(D * (pct_val / 100), nom_val)
-        elif row["Tipe Cut"] == "Nominal (Rp)":
-            val = nom_val # Jika pilih nominal, yang dibaca adalah kolom nominal/batas max
+        elif tipe_cut == "Nominal (Rp)":
+            val = nom_val 
             
         val = round(val)
         rincian_potongan.append(val)
         
-        if row["Kategori"] == "Admin": admin_total += val
-        elif row["Kategori"] == "Layanan": layanan_total += val
-        elif row["Kategori"] == "Asuransi": asuransi_total += val
+        if kategori == "Admin": admin_total += val
+        elif kategori == "Layanan": layanan_total += val
+        elif kategori == "Asuransi": asuransi_total += val
 
     M = B - C
     N = admin_total / D if D > 0 else 0
@@ -179,39 +186,41 @@ if not new_state_df.equals(st.session_state.biaya_df.reset_index(drop=True)):
 st.markdown("---")
 st.subheader("📑 2. Summary & Logic Pencairan Shopee")
 
-# Membuat Data Struktur untuk Tabel Logic
-logic_data = [
-    {"Keterangan": "🔹 SUMMARY", "Nominal / Persentase": "", "Catatan": ""},
-    {"Keterangan": "Harga Setelah Potong Voucher", "Nominal / Persentase": format_rp(bd['D']), "Catatan": "Harga tampil (A) dikurangi total potongan voucher (B)."},
-    {"Keterangan": "Biaya Admin di Seller Center", "Nominal / Persentase": format_rp(bd['Admin']), "Catatan": f"{format_pct(bd['N'])} dari Harga Setelah Potong Voucher"},
-    {"Keterangan": "Biaya Layanan + Proses Pesanan", "Nominal / Persentase": format_rp(bd['Layanan']), "Catatan": f"{format_pct(bd['O'])} dari Harga Setelah Potong Voucher"},
-    {"Keterangan": "Biaya Asuransi (Opsional)", "Nominal / Persentase": format_rp(bd['Asuransi']), "Catatan": "-"},
+# Menghindari KeyError saat baris dihapus semua / error logic D <= 0
+if hrg_stlh_voc > 0:
+    logic_data = [
+        {"Keterangan": "🔹 SUMMARY", "Nominal / Persentase": "", "Catatan": ""},
+        {"Keterangan": "Harga Setelah Potong Voucher", "Nominal / Persentase": format_rp(bd['D']), "Catatan": "Harga tampil (A) dikurangi total potongan voucher (B)."},
+        {"Keterangan": "Biaya Admin di Seller Center", "Nominal / Persentase": format_rp(bd['Admin']), "Catatan": f"{format_pct(bd['N'])} dari Harga Setelah Potong Voucher"},
+        {"Keterangan": "Biaya Layanan + Proses Pesanan", "Nominal / Persentase": format_rp(bd['Layanan']), "Catatan": f"{format_pct(bd['O'])} dari Harga Setelah Potong Voucher"},
+        {"Keterangan": "Biaya Asuransi (Opsional)", "Nominal / Persentase": format_rp(bd['Asuransi']), "Catatan": "-"},
+        
+        {"Keterangan": "🔸 LOGIC", "Nominal / Persentase": "", "Catatan": ""},
+        {"Keterangan": "Voucher Ditanggung Shopee", "Nominal / Persentase": format_rp(bd['M']), "Catatan": "Menghitung nilai subsidi yang harus dikembalikan Shopee."},
+        {"Keterangan": "Tarif Admin Toko", "Nominal / Persentase": format_pct(bd['N']), "Catatan": "Mencari tahu persentase tarif komisi admin."},
+        {"Keterangan": "Tarif Layanan Toko", "Nominal / Persentase": format_pct(bd['O']), "Catatan": "Mencari tahu persentase tarif layanan toko."},
+        {"Keterangan": "Utang Selisih Admin", "Nominal / Persentase": format_rp(bd['P']), "Catatan": "Potongan admin dari subsidi Shopee."},
+        {"Keterangan": "Utang Selisih Layanan", "Nominal / Persentase": format_rp(bd['Q']), "Catatan": "Potongan layanan dari subsidi Shopee."},
+        {"Keterangan": "Total Utang Fee", "Nominal / Persentase": format_rp(bd['R']), "Catatan": "Total semua potongan biaya baru (utang selisih)."},
+        
+        {"Keterangan": "💵 HASIL PENCAIRAN", "Nominal / Persentase": "", "Catatan": ""},
+        {"Keterangan": "Refund Bersih Shopee", "Nominal / Persentase": format_rp(bd['S']), "Catatan": "Uang subsidi bersih yang akan ditransfer Shopee ke Anda."},
+        {"Keterangan": "Payout Awal Seller Center", "Nominal / Persentase": format_rp(bd['T']), "Catatan": "Uang yang sudah masuk ke saldo Anda di awal."},
+        {"Keterangan": "Total Pendapatan Akhir", "Nominal / Persentase": format_rp(bd['U']), "Catatan": "Harga Bersih yang ditarik (Target Anda)."}
+    ]
     
-    {"Keterangan": "🔸 LOGIC", "Nominal / Persentase": "", "Catatan": ""},
-    {"Keterangan": "Voucher Ditanggung Shopee", "Nominal / Persentase": format_rp(bd['M']), "Catatan": "Menghitung nilai subsidi yang harus dikembalikan Shopee."},
-    {"Keterangan": "Tarif Admin Toko", "Nominal / Persentase": format_pct(bd['N']), "Catatan": "Mencari tahu persentase tarif komisi admin."},
-    {"Keterangan": "Tarif Layanan Toko", "Nominal / Persentase": format_pct(bd['O']), "Catatan": "Mencari tahu persentase tarif layanan toko."},
-    {"Keterangan": "Utang Selisih Admin", "Nominal / Persentase": format_rp(bd['P']), "Catatan": "Potongan admin dari subsidi Shopee."},
-    {"Keterangan": "Utang Selisih Layanan", "Nominal / Persentase": format_rp(bd['Q']), "Catatan": "Potongan layanan dari subsidi Shopee."},
-    {"Keterangan": "Total Utang Fee", "Nominal / Persentase": format_rp(bd['R']), "Catatan": "Total semua potongan biaya baru (utang selisih)."},
+    st.dataframe(
+        pd.DataFrame(logic_data),
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "Keterangan": st.column_config.TextColumn("Keterangan", width="medium"),
+            "Nominal / Persentase": st.column_config.TextColumn("Nominal", width="small"),
+            "Catatan": st.column_config.TextColumn("Catatan Deskripsi", width="large"),
+        }
+    )
     
-    {"Keterangan": "💵 HASIL PENCAIRAN", "Nominal / Persentase": "", "Catatan": ""},
-    {"Keterangan": "Refund Bersih Shopee", "Nominal / Persentase": format_rp(bd['S']), "Catatan": "Uang subsidi bersih yang akan ditransfer Shopee ke Anda."},
-    {"Keterangan": "Payout Awal Seller Center", "Nominal / Persentase": format_rp(bd['T']), "Catatan": "Uang yang sudah masuk ke saldo Anda di awal."},
-    {"Keterangan": "Total Pendapatan Akhir", "Nominal / Persentase": format_rp(bd['U']), "Catatan": "Harga Bersih yang ditarik (Target Anda)."}
-]
-
-# Tampilkan sebagai tabel static HTML / DataFrame yang sangat rapi
-st.dataframe(
-    pd.DataFrame(logic_data),
-    use_container_width=True,
-    hide_index=True,
-    column_config={
-        "Keterangan": st.column_config.TextColumn("Keterangan", width="medium"),
-        "Nominal / Persentase": st.column_config.TextColumn("Nominal", width="small"),
-        "Catatan": st.column_config.TextColumn("Catatan Deskripsi", width="large"),
-    }
-)
-
-if bd['U'] == target_bersih:
-    st.success(f"✅ **Verifikasi Akurat:** Total Pendapatan Akhir (**{format_rp(bd['U'])}**) sudah persis sama dengan Target Pendapatan Anda.")
+    if bd['U'] == target_bersih:
+        st.success(f"✅ **Verifikasi Akurat:** Total Pendapatan Akhir (**{format_rp(bd['U'])}**) sudah persis sama dengan Target Pendapatan Anda.")
+else:
+    st.warning("Menunggu data untuk dikalkulasi...")
