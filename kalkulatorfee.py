@@ -1,14 +1,16 @@
 import streamlit as st
 import pandas as pd
 
-st.set_page_config(page_title="Kalkulator Harga Tampil", layout="wide")
+st.set_page_config(page_title="Kalkulator Harga Jual Shopee", layout="wide")
 
 # --- FORMATTING FUNCTIONS ---
 def format_rp(angka):
     return f"Rp {int(round(angka)):,.0f}".replace(",", ".")
 
+def format_pct(angka):
+    return f"{angka * 100:.2f}%"
+
 # --- INIT STATE: TABEL DATA MENTAH ---
-# Menyimpan data tabel (tanpa kolom hasil hitung) di session state
 if 'biaya_df' not in st.session_state:
     st.session_state.biaya_df = pd.DataFrame([
         {"Aktif": True, "Deskripsi": "Biaya Administrasi", "Kategori": "Admin", "Tipe Cut": "Persentase (%)", "Nilai": 4.7, "Max (Rp)": 0},
@@ -31,7 +33,9 @@ def calculate_shopee(harga_tampil, target_bersih, voucher_cfg, fees_df):
         B, C = 0, 0
         
     D = A - B
-    if D <= 0: return 0, [], 0, 0
+    
+    if D <= 0: 
+        return 0, [], 0, 0, {}
     
     admin_total = 0
     layanan_total = 0
@@ -71,7 +75,13 @@ def calculate_shopee(harga_tampil, target_bersih, voucher_cfg, fees_df):
     
     U = S + T
     
-    return U, rincian_potongan, (admin_total + layanan_total + asuransi_total), D
+    # Simpan semua rincian logika ke dictionary untuk tabel Summary
+    breakdown = {
+        'Admin': admin_total, 'Layanan': layanan_total, 'Asuransi': asuransi_total,
+        'M': M, 'N': N, 'O': O, 'P': P, 'Q': Q, 'R': R, 'S': S, 'T': T, 'U': U
+    }
+    
+    return U, rincian_potongan, (admin_total + layanan_total + asuransi_total), D, breakdown
 
 def find_optimum_price(target_bersih, voucher_cfg, fees_df):
     low = target_bersih
@@ -79,25 +89,25 @@ def find_optimum_price(target_bersih, voucher_cfg, fees_df):
     
     for _ in range(70): 
         mid = (low + high) / 2
-        current_bersih, _, _, _ = calculate_shopee(mid, target_bersih, voucher_cfg, fees_df)
+        current_bersih, _, _, _, _ = calculate_shopee(mid, target_bersih, voucher_cfg, fees_df)
         if current_bersih < target_bersih:
             low = mid
         else:
             high = mid
             
     final_harga = round(high)
-    _, rincian, total_potongan, hrg_stlh_voc = calculate_shopee(final_harga, target_bersih, voucher_cfg, fees_df)
-    return final_harga, rincian, total_potongan, hrg_stlh_voc
+    _, rincian, total_potongan, hrg_stlh_voc, breakdown = calculate_shopee(final_harga, target_bersih, voucher_cfg, fees_df)
+    return final_harga, rincian, total_potongan, hrg_stlh_voc, breakdown
 
 
 # --- USER INTERFACE (UI) ---
-st.title("🍊 Kalkulator Harga Jual Shopee (Tabel Tunggal)")
+st.title("🍊 Kalkulator Harga Jual Shopee (Tabel Tunggal & Co-Fund)")
 
 # 1. INPUT TARGET & VOUCHER
 col1, col2 = st.columns(2)
 with col1:
     st.subheader("💰 Target Pendapatan")
-    target_bersih = st.number_input("Harga Bersih (Pencairan) yang diinginkan:", min_value=1000, value=7150522, step=10000)
+    target_bersih = st.number_input("Harga Bersih (Pencairan) yang diinginkan:", min_value=1000, value=9850000, step=10000)
 
 with col2:
     st.subheader("🎟️ Pengaturan Voucher")
@@ -120,7 +130,7 @@ voucher_cfg = {
 }
 
 # --- HITUNG BERDASARKAN DATA SAAT INI ---
-harga_optimum, rincian_potongan, total_potongan, hrg_stlh_voc = find_optimum_price(
+harga_optimum, rincian_potongan, total_potongan, hrg_stlh_voc, bd = find_optimum_price(
     target_bersih, voucher_cfg, st.session_state.biaya_df
 )
 
@@ -133,13 +143,11 @@ c_res1.metric(label="🎯 Harga Jual Optimum (Harga Tampil)", value=format_rp(ha
 c_res2.metric(label="📉 Total Potongan Biaya & Asuransi", value=format_rp(total_potongan), delta=f"-{pct_total_potongan:.2f}%", delta_color="inverse")
 
 # 3. TABEL DINAMIS (INPUT + OUTPUT GABUNGAN)
-st.subheader("⚙️ Rincian Biaya & Komponen")
+st.subheader("⚙️ 1. Rincian Biaya & Komponen")
 
-# Membuat salinan dataframe khusus untuk ditampilkan di layar (menambahkan kolom hasil hitung)
 display_df = st.session_state.biaya_df.copy()
 display_df["Nominal Potongan"] = [f"- {format_rp(x)}" if aktif else "-" for x, aktif in zip(rincian_potongan, display_df["Aktif"])]
 
-# Konfigurasi kolom
 config_kolom = {
     "Aktif": st.column_config.CheckboxColumn("Status", default=True),
     "Deskripsi": st.column_config.TextColumn("Deskripsi Biaya / Komponen"),
@@ -147,23 +155,59 @@ config_kolom = {
     "Tipe Cut": st.column_config.SelectboxColumn("Tipe Potongan", options=["Persentase (%)", "Persen dgn Batas Max", "Nominal (Rp)"], required=True),
     "Nilai": st.column_config.NumberColumn("Nilai (%/Rp)", format="%.2f"),
     "Max (Rp)": st.column_config.NumberColumn("Batas Max (Rp)", format="%d"),
-    "Nominal Potongan": st.column_config.TextColumn("Nominal Potongan (Otomatis)", disabled=True) # DISABLED = READ-ONLY
+    "Nominal Potongan": st.column_config.TextColumn("Nominal Potongan (Otomatis)", disabled=True)
 }
 
-# Render tabel
 edited_df = st.data_editor(
     display_df, 
     column_config=config_kolom, 
-    num_rows="dynamic", # Bisa tambah/hapus baris
+    num_rows="dynamic", 
     use_container_width=True,
     hide_index=True
 )
 
-# Cek apakah user merubah isi tabel (merubah angka, centang, tambah/hapus baris)
-# Jika berubah, simpan perubahannya ke session state, lalu muat ulang halaman agar angka terhitung ulang
 new_state_df = edited_df.drop(columns=["Nominal Potongan"]).reset_index(drop=True)
 if not new_state_df.equals(st.session_state.biaya_df.reset_index(drop=True)):
     st.session_state.biaya_df = new_state_df
     st.rerun()
 
-st.caption("💡 *Tabel di atas sepenuhnya interaktif. Anda bisa mengedit nilai, mencentang/menghapus centang (Status), hingga menambah baris baru. Hasil akan langsung terhitung ulang seketika pada kolom paling kanan (Nominal Potongan).*")
+# 4. TABEL LOGIC & SUMMARY CO-FUND VOUCHER
+st.markdown("---")
+st.subheader("📑 2. Summary & Logic Pencairan Shopee")
+st.caption("Tabel di bawah ini mereplika perhitungan Utang Selisih Admin & Layanan berdasarkan skema Co-Fund Voucher.")
+
+# Membuat Data Struktur untuk Tabel Logic
+logic_data = [
+    {"Keterangan": "🔹 SUMMARY", "Nominal / Persentase": "", "Catatan": ""},
+    {"Keterangan": "Biaya Admin di Seller Center", "Nominal / Persentase": format_rp(bd['Admin']), "Catatan": f"{format_pct(bd['N'])} dari Harga Potong Voucher"},
+    {"Keterangan": "Biaya Layanan + Proses Pesanan", "Nominal / Persentase": format_rp(bd['Layanan']), "Catatan": f"{format_pct(bd['O'])} dari Harga Potong Voucher"},
+    {"Keterangan": "Biaya Asuransi (Opsional)", "Nominal / Persentase": format_rp(bd['Asuransi']), "Catatan": "-"},
+    
+    {"Keterangan": "🔸 LOGIC", "Nominal / Persentase": "", "Catatan": ""},
+    {"Keterangan": "Voucher Ditanggung Shopee", "Nominal / Persentase": format_rp(bd['M']), "Catatan": "Menghitung nilai subsidi yang harus dikembalikan Shopee."},
+    {"Keterangan": "Tarif Admin Toko", "Nominal / Persentase": format_pct(bd['N']), "Catatan": "Mencari tahu persentase tarif komisi admin."},
+    {"Keterangan": "Tarif Layanan Toko", "Nominal / Persentase": format_pct(bd['O']), "Catatan": "Mencari tahu persentase tarif layanan toko."},
+    {"Keterangan": "Utang Selisih Admin", "Nominal / Persentase": format_rp(bd['P']), "Catatan": "Potongan admin dari subsidi Shopee."},
+    {"Keterangan": "Utang Selisih Layanan", "Nominal / Persentase": format_rp(bd['Q']), "Catatan": "Potongan layanan dari subsidi Shopee."},
+    {"Keterangan": "Total Utang Fee", "Nominal / Persentase": format_rp(bd['R']), "Catatan": "Total semua potongan biaya baru (utang selisih)."},
+    
+    {"Keterangan": "💵 HASIL PENCAIRAN", "Nominal / Persentase": "", "Catatan": ""},
+    {"Keterangan": "Refund Bersih Shopee", "Nominal / Persentase": format_rp(bd['S']), "Catatan": "Uang subsidi bersih yang akan ditransfer Shopee ke Anda."},
+    {"Keterangan": "Payout Awal Seller Center", "Nominal / Persentase": format_rp(bd['T']), "Catatan": "Uang yang sudah masuk ke saldo Anda di awal."},
+    {"Keterangan": "Total Pendapatan Akhir", "Nominal / Persentase": format_rp(bd['U']), "Catatan": "Harga Bersih yang ditarik (Target Anda)."}
+]
+
+# Tampilkan sebagai tabel static HTML / DataFrame yang sangat rapi
+st.dataframe(
+    pd.DataFrame(logic_data),
+    use_container_width=True,
+    hide_index=True,
+    column_config={
+        "Keterangan": st.column_config.TextColumn("Keterangan", width="medium"),
+        "Nominal / Persentase": st.column_config.TextColumn("Nominal", width="small"),
+        "Catatan": st.column_config.TextColumn("Catatan Deskripsi", width="large"),
+    }
+)
+
+if bd['U'] == target_bersih:
+    st.success(f"✅ **Verifikasi Akurat:** Total Pendapatan Akhir (**{format_rp(bd['U'])}**) sudah persis sama dengan Target Pendapatan Anda.")
