@@ -88,7 +88,7 @@ def calculate_shopee(harga_tampil, target_bersih, voucher_cfg, fees_df):
     
     # Simpan semua rincian logika ke dictionary untuk tabel Summary
     breakdown = {
-        'Harga Tampil': A, 'D': D, 'Admin': admin_total, 'Layanan': layanan_total, 'Asuransi': asuransi_total,
+        'Harga Tampil': A, 'Voucher': B, 'Beban Seller': C, 'D': D, 'Admin': admin_total, 'Layanan': layanan_total, 'Asuransi': asuransi_total,
         'M': M, 'N': N, 'O': O, 'P': P, 'Q': Q, 'R': R, 'S': S, 'T': T, 'U': U
     }
     
@@ -189,7 +189,10 @@ st.subheader("📑 2. Summary & Logic Pencairan Shopee")
 # Menghindari KeyError saat baris dihapus semua / error logic D <= 0
 if hrg_stlh_voc > 0:
     logic_data = [
-        {"Keterangan": "🔹 SUMMARY", "Nominal / Persentase": format_rp(bd['Harga Tampil']), "Catatan": ""},
+        {"Keterangan": "🔹 SUMMARY", "Nominal / Persentase": "", "Catatan": ""},
+        {"Keterangan": "Harga Tampil", "Nominal / Persentase": format_rp(bd['Harga Tampil']), "Catatan": "Harga tampil + Voucher"},
+        {"Keterangan": "Voucher", "Nominal / Persentase": format_rp(bd['Voucher']), "Catatan": "Voucher Co Fund"},
+        {"Keterangan": "Beban Seller", "Nominal / Persentase": format_rp(bd['Beban Seller']), "Catatan": "Beban seller dari total Voucher"},
         {"Keterangan": "Harga Setelah Potong Voucher", "Nominal / Persentase": format_rp(bd['D']), "Catatan": "Harga tampil (A) dikurangi total potongan voucher (B)."},
         {"Keterangan": "Biaya Admin di Seller Center", "Nominal / Persentase": format_rp(bd['Admin']), "Catatan": f"{format_pct(bd['N'])} dari Harga Setelah Potong Voucher"},
         {"Keterangan": "Biaya Layanan + Proses Pesanan", "Nominal / Persentase": format_rp(bd['Layanan']), "Catatan": f"{format_pct(bd['O'])} dari Harga Setelah Potong Voucher"},
