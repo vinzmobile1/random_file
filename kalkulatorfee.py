@@ -189,7 +189,7 @@ st.subheader("📑 2. Summary & Logic Pencairan Shopee")
 # Menghindari KeyError saat baris dihapus semua / error logic D <= 0
 if hrg_stlh_voc > 0:
     logic_data = [
-        {"Keterangan": "🔹 SUMMARY", "Nominal / Persentase": "", "Catatan": ""},
+        {"Keterangan": "🔹 SUMMARY", "Nominal / Persentase": format_rp(bd['harga_optimum']), "Catatan": ""},
         {"Keterangan": "Harga Setelah Potong Voucher", "Nominal / Persentase": format_rp(bd['D']), "Catatan": "Harga tampil (A) dikurangi total potongan voucher (B)."},
         {"Keterangan": "Biaya Admin di Seller Center", "Nominal / Persentase": format_rp(bd['Admin']), "Catatan": f"{format_pct(bd['N'])} dari Harga Setelah Potong Voucher"},
         {"Keterangan": "Biaya Layanan + Proses Pesanan", "Nominal / Persentase": format_rp(bd['Layanan']), "Catatan": f"{format_pct(bd['O'])} dari Harga Setelah Potong Voucher"},
